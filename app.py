@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -9,7 +11,7 @@ from pipeline import (
 
 
 # ============================================================
-# CONFIGURATION
+# PAGE CONFIGURATION
 # ============================================================
 
 st.set_page_config(
@@ -18,48 +20,60 @@ st.set_page_config(
     layout="wide"
 )
 
-# Load local .env
-load_dotenv()
+
+# ============================================================
+# LOAD LOCAL .ENV
+# ============================================================
+
+BASE_DIR = Path(__file__).resolve().parent
+ENV_FILE = BASE_DIR / ".env"
+
+load_dotenv(
+    dotenv_path=ENV_FILE,
+    override=True
+)
 
 
 # ============================================================
-# API KEY CONFIGURATION
+# LOAD API KEYS
 # ============================================================
 
-def get_api_key(name):
-    """
-    Local:
-        Read API key from .env
+# First try the local .env / environment variables.
+groq_key = os.getenv("GROQ_API_KEY")
+gemini_key = os.getenv("GEMINI_API_KEY")
 
-    Streamlit Cloud:
-        Read API key from Streamlit Secrets
-    """
 
-    # --------------------------------------------------------
-    # 1. Local .env / environment variable
-    # --------------------------------------------------------
+# ------------------------------------------------------------
+# Streamlit Cloud fallback
+# ------------------------------------------------------------
+# This block is only reached if the environment variable
+# wasn't found.
+#
+# Therefore, when running locally with .env, Streamlit will
+# NOT try to access st.secrets and will NOT show the
+# "No secrets found" warning.
+# ------------------------------------------------------------
 
-    value = os.getenv(name)
-
-    if value:
-        return value
-
-    # --------------------------------------------------------
-    # 2. Streamlit Cloud Secrets
-    # --------------------------------------------------------
+if not groq_key:
 
     try:
-        return st.secrets[name]
-
-    except (KeyError, FileNotFoundError):
-        return None
-
-
-groq_key = get_api_key("GROQ_API_KEY")
-gemini_key = get_api_key("GEMINI_API_KEY")
+        groq_key = st.secrets["GROQ_API_KEY"]
+    except Exception:
+        groq_key = None
 
 
-# Make the keys available to LangChain
+if not gemini_key:
+
+    try:
+        gemini_key = st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        gemini_key = None
+
+
+# ============================================================
+# MAKE KEYS AVAILABLE TO LANGCHAIN
+# ============================================================
+
 if groq_key:
     os.environ["GROQ_API_KEY"] = groq_key
 
@@ -68,15 +82,24 @@ if gemini_key:
 
 
 # ============================================================
-# CHECK CONFIGURATION
+# CHECK API CONFIGURATION
 # ============================================================
 
 if not groq_key:
-    st.error("Groq API key is not configured.")
+
+    st.error(
+        "Groq API key is not configured."
+    )
+
     st.stop()
 
+
 if not gemini_key:
-    st.error("Gemini API key is not configured.")
+
+    st.error(
+        "Gemini API key is not configured."
+    )
+
     st.stop()
 
 
@@ -143,23 +166,30 @@ else:
 
 
 # ============================================================
-# ANALYZE BUTTON
+# ANALYZE SOURCE
 # ============================================================
 
-if st.button(
+analyze_button = st.button(
     "🚀 Analyze Source",
     type="primary",
     use_container_width=True
-):
+)
 
-    # --------------------------------------------------------
+
+if analyze_button:
+
+    # ========================================================
     # URL
-    # --------------------------------------------------------
+    # ========================================================
 
     if source_type == "🌐 URL":
 
         if not source:
-            st.warning("Please enter a URL.")
+
+            st.warning(
+                "Please enter a URL."
+            )
+
             st.stop()
 
         try:
@@ -173,6 +203,7 @@ if st.button(
                     source_type="url"
                 )
 
+            # Store result for later questions
             st.session_state["result"] = result
 
             st.success(
@@ -186,11 +217,11 @@ if st.button(
             )
 
 
-    # --------------------------------------------------------
-    # PDF
-    # --------------------------------------------------------
+    # ========================================================
+    # LOCAL PDF
+    # ========================================================
 
-    else:
+    elif source_type == "📄 Local PDF":
 
         if uploaded_file is None:
 
@@ -211,6 +242,7 @@ if st.button(
                     source_type="pdf"
                 )
 
+            # Store result for later questions
             st.session_state["result"] = result
 
             st.success(
@@ -225,7 +257,7 @@ if st.button(
 
 
 # ============================================================
-# RESULTS
+# DISPLAY RESULTS
 # ============================================================
 
 if "result" in st.session_state:
@@ -236,9 +268,10 @@ if "result" in st.session_state:
 
     st.header("📌 Insights")
 
-    # --------------------------------------------------------
+
+    # ========================================================
     # SUMMARY
-    # --------------------------------------------------------
+    # ========================================================
 
     if isinstance(result, dict):
 
@@ -251,9 +284,9 @@ if "result" in st.session_state:
             )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # KEY POINTS
-        # ----------------------------------------------------
+        # ====================================================
 
         if "key_points" in result:
 
@@ -271,22 +304,34 @@ if "result" in st.session_state:
 
             else:
 
-                st.write(key_points)
+                st.write(
+                    key_points
+                )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # CHUNK INFORMATION
-        # ----------------------------------------------------
+        # ====================================================
 
         if "chunks" in result:
 
-            st.caption(
-                f"Processed {len(result['chunks'])} document chunks."
-            )
+            try:
+
+                chunk_count = len(
+                    result["chunks"]
+                )
+
+                st.caption(
+                    f"Processed {chunk_count} document chunks."
+                )
+
+            except Exception:
+
+                pass
 
 
     # ========================================================
-    # Q&A
+    # QUESTION ANSWERING
     # ========================================================
 
     st.divider()
@@ -299,12 +344,15 @@ if "result" in st.session_state:
     )
 
 
-    if st.button(
+    ask_button = st.button(
         "🔍 Ask",
         use_container_width=True
-    ):
+    )
 
-        if not question:
+
+    if ask_button:
+
+        if not question.strip():
 
             st.warning(
                 "Please enter a question."
@@ -323,9 +371,13 @@ if "result" in st.session_state:
                         vector_store=result["vector_store"]
                     )
 
-                st.subheader("Answer")
+                st.subheader(
+                    "Answer"
+                )
 
-                st.write(answer)
+                st.write(
+                    answer
+                )
 
             except Exception as e:
 
