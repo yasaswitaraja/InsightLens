@@ -4,8 +4,7 @@ from dotenv import load_dotenv
 
 from pipeline import (
     process_source,
-    answer_question,
-    generate_summary
+    answer_question
 )
 
 
@@ -19,33 +18,48 @@ st.set_page_config(
     layout="wide"
 )
 
+# Load local .env
 load_dotenv()
 
 
 # ============================================================
-# LOAD API KEYS
+# API KEY CONFIGURATION
 # ============================================================
 
-def get_secret(name):
+def get_api_key(name):
     """
-    Get API key from Streamlit Cloud Secrets first.
-    Fall back to local .env when running locally.
+    Local:
+        Read API key from .env
+
+    Streamlit Cloud:
+        Read API key from Streamlit Secrets
     """
+
+    # --------------------------------------------------------
+    # 1. Local .env / environment variable
+    # --------------------------------------------------------
+
+    value = os.getenv(name)
+
+    if value:
+        return value
+
+    # --------------------------------------------------------
+    # 2. Streamlit Cloud Secrets
+    # --------------------------------------------------------
+
     try:
-        value = st.secrets.get(name)
-        if value:
-            return value
-    except Exception:
-        pass
+        return st.secrets[name]
 
-    return os.getenv(name)
+    except (KeyError, FileNotFoundError):
+        return None
 
 
-groq_key = get_secret("GROQ_API_KEY")
-gemini_key = get_secret("GEMINI_API_KEY")
+groq_key = get_api_key("GROQ_API_KEY")
+gemini_key = get_api_key("GEMINI_API_KEY")
 
 
-# Make keys available to LangChain libraries
+# Make the keys available to LangChain
 if groq_key:
     os.environ["GROQ_API_KEY"] = groq_key
 
@@ -54,14 +68,15 @@ if gemini_key:
 
 
 # ============================================================
-# CHECK API KEYS
+# CHECK CONFIGURATION
 # ============================================================
 
-if not groq_key or not gemini_key:
-    st.error(
-        "Application configuration is incomplete. "
-        "Please configure the required API keys."
-    )
+if not groq_key:
+    st.error("Groq API key is not configured.")
+    st.stop()
+
+if not gemini_key:
+    st.error("Gemini API key is not configured.")
     st.stop()
 
 
@@ -111,6 +126,7 @@ with st.sidebar:
 source = None
 uploaded_file = None
 
+
 if source_type == "🌐 URL":
 
     source = st.text_input(
@@ -127,21 +143,18 @@ else:
 
 
 # ============================================================
-# PROCESS BUTTON
+# ANALYZE BUTTON
 # ============================================================
 
-process_button = st.button(
+if st.button(
     "🚀 Analyze Source",
     type="primary",
     use_container_width=True
-)
+):
 
-
-# ============================================================
-# PROCESS SOURCE
-# ============================================================
-
-if process_button:
+    # --------------------------------------------------------
+    # URL
+    # --------------------------------------------------------
 
     if source_type == "🌐 URL":
 
@@ -151,7 +164,9 @@ if process_button:
 
         try:
 
-            with st.spinner("Loading and analyzing source..."):
+            with st.spinner(
+                "Loading and analyzing source..."
+            ):
 
                 result = process_source(
                     source=source,
@@ -160,21 +175,36 @@ if process_button:
 
             st.session_state["result"] = result
 
-            st.success("Source analyzed successfully!")
+            st.success(
+                "Source analyzed successfully!"
+            )
 
         except Exception as e:
 
-            st.error(f"Error while processing source: {e}")
+            st.error(
+                f"Error while processing source: {e}"
+            )
+
+
+    # --------------------------------------------------------
+    # PDF
+    # --------------------------------------------------------
 
     else:
 
         if uploaded_file is None:
-            st.warning("Please upload a PDF.")
+
+            st.warning(
+                "Please upload a PDF."
+            )
+
             st.stop()
 
         try:
 
-            with st.spinner("Reading and analyzing PDF..."):
+            with st.spinner(
+                "Reading and analyzing PDF..."
+            ):
 
                 result = process_source(
                     source=uploaded_file,
@@ -183,15 +213,19 @@ if process_button:
 
             st.session_state["result"] = result
 
-            st.success("PDF analyzed successfully!")
+            st.success(
+                "PDF analyzed successfully!"
+            )
 
         except Exception as e:
 
-            st.error(f"Error while processing PDF: {e}")
+            st.error(
+                f"Error while processing PDF: {e}"
+            )
 
 
 # ============================================================
-# DISPLAY RESULTS
+# RESULTS
 # ============================================================
 
 if "result" in st.session_state:
@@ -212,7 +246,10 @@ if "result" in st.session_state:
 
             st.subheader("📝 Summary")
 
-            st.write(result["summary"])
+            st.write(
+                result["summary"]
+            )
+
 
         # ----------------------------------------------------
         # KEY POINTS
@@ -227,14 +264,18 @@ if "result" in st.session_state:
             if isinstance(key_points, list):
 
                 for point in key_points:
-                    st.markdown(f"- {point}")
+
+                    st.markdown(
+                        f"- {point}"
+                    )
 
             else:
 
                 st.write(key_points)
 
+
         # ----------------------------------------------------
-        # CHUNKS / DOCUMENT INFO
+        # CHUNK INFORMATION
         # ----------------------------------------------------
 
         if "chunks" in result:
@@ -245,7 +286,7 @@ if "result" in st.session_state:
 
 
     # ========================================================
-    # QUESTION ANSWERING
+    # Q&A
     # ========================================================
 
     st.divider()
@@ -257,6 +298,7 @@ if "result" in st.session_state:
         placeholder="What are the main findings?"
     )
 
+
     if st.button(
         "🔍 Ask",
         use_container_width=True
@@ -264,17 +306,21 @@ if "result" in st.session_state:
 
         if not question:
 
-            st.warning("Please enter a question.")
+            st.warning(
+                "Please enter a question."
+            )
 
         else:
 
             try:
 
-                with st.spinner("Searching the source..."):
+                with st.spinner(
+                    "Searching the source..."
+                ):
 
                     answer = answer_question(
                         question=question,
-                        result=result
+                        vector_store=result["vector_store"]
                     )
 
                 st.subheader("Answer")
