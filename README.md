@@ -1,76 +1,75 @@
-# Multi-Source Insight & Q&A Generator
+# 🔎 InsightLens — Multi-Source Insight & Q&A Generator
 
-Takes a **YouTube video**, **research paper (PDF/arXiv)**, or **web article**, and produces:
-- A structured summary (key points, claims + evidence, limitations, target audience)
-- Auto-generated Q&A grounded in the source
-- An interactive chat interface with citations
-- A basic **groundedness eval** (LLM-as-judge hallucination check)
+<p align="center">
+  <b>Turn YouTube videos, research papers, web articles, and PDFs into structured insights and grounded answers.</b>
+</p>
 
-Built with LangChain, OpenAI, Chroma, and Streamlit.
+<p align="center">
+  <a href="https://insightlenss.streamlit.app/">
+    <img src="https://img.shields.io/badge/🚀%20Live%20Demo-InsightLens-FF4B4B?style=for-the-badge" alt="Live Demo">
+  </a>
+  <a href="https://github.com/yasaswitaraja/InsightLens">
+    <img src="https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github" alt="GitHub">
+  </a>
+</p>
 
-## Architecture
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white">
+  <img src="https://img.shields.io/badge/Streamlit-1.40+-FF4B4B?style=flat-square&logo=streamlit&logoColor=white">
+  <img src="https://img.shields.io/badge/LangChain-RAG-1C3C3C?style=flat-square">
+  <img src="https://img.shields.io/badge/Groq-LLM-F55036?style=flat-square">
+  <img src="https://img.shields.io/badge/Gemini-Embeddings-4285F4?style=flat-square&logo=google">
+  <img src="https://img.shields.io/badge/Chroma-Vector%20DB-FF6F61?style=flat-square">
+</p>
 
-```
-URL input
-   │
-   ▼
-┌─────────────┐     detect source type (youtube / pdf / web)
-│  loaders.py │ ──► extract raw text + metadata
-└─────────────┘     (transcript API / pypdf / BeautifulSoup)
-   │
-   ▼
-┌─────────────┐     source-aware chunking
-│ pipeline.py │ ──► OpenAI embeddings → Chroma vector store
-└─────────────┘     map-reduce summarization (Pydantic structured output)
-   │                retrieval-grounded Q&A generation
-   ▼
-┌─────────────┐
-│ qa_eval.py  │ ──► LLM-as-judge groundedness check on generated Q&A
-└─────────────┘
-   │
-   ▼
-┌─────────────┐
-│   app.py    │ ──► Streamlit UI (summary / Q&A / chat / eval tabs)
-└─────────────┘
-```
+---
 
-## Design decisions worth knowing for an interview
+## 🌐 Live Application
 
-- **Chunking strategy differs by source type.** YouTube transcripts are conversational,
-  so they use smaller chunks (800 chars) with more overlap to preserve context around a
-  spoken idea. Papers use larger chunks (1200 chars) since paragraphs are denser and more
-  self-contained. This is a deliberate tradeoff, not a default.
-- **Map-reduce summarization** instead of stuffing the whole document into one prompt —
-  avoids context-window blowups on long transcripts/papers and is cheaper per call.
-- **Structured output via Pydantic** (`PydanticOutputParser`) rather than asking the LLM
-  to "return JSON" and hoping — this fails loudly and predictably instead of silently
-  producing malformed output.
-- **Citations are enforced by prompt design**, not post-hoc: the QA chain is given
-  numbered context blocks and instructed to cite `[1]`, `[2]`, etc., and told explicitly
-  to say "not found" rather than guess.
-- **The eval is real, if simple**: an LLM-as-judge pass checks whether each auto-generated
-  answer is actually supported by the source text, and reports a pass rate. Most portfolio
-  RAG projects skip evaluation entirely — this one doesn't.
+### 🚀 [Try InsightLens Live](https://insightlenss.streamlit.app/)
 
-## Setup
+Analyze a source and interact with it using AI-powered summarization and Retrieval-Augmented Generation (RAG).
 
-```bash
-pip install -r requirements.txt
-cp .env.example .env   # then add your OpenAI API key
-streamlit run app.py
-```
+**Supported sources:**
 
-## Known limitations
+| Source | Supported |
+|---|:---:|
+| 🎥 YouTube Videos | ✅ |
+| 📄 Research Papers / arXiv | ✅ |
+| 🌐 Web Articles | ✅ |
+| 📑 Local PDF Files | ✅ |
 
-- Uses an in-memory Chroma store — data doesn't persist between runs. For a production
-  version, add a `persist_directory` and reuse the vector store across sessions.
-- YouTube extraction depends on the video having captions/transcripts enabled.
-- The groundedness eval is LLM-as-judge, not a formal metric (e.g. RAGAS) — good enough
-  to demonstrate the concept, but call this out if asked in an interview.
+---
 
-## Possible extensions
+# 🧠 What is InsightLens?
 
-- Swap Chroma for a persistent store (Pinecone/Weaviate) for multi-session use
-- Add RAGAS or DeepEval for more rigorous automated evaluation
-- Add streaming responses in the chat tab for better perceived latency
-- Support multi-document comparison ("compare these two papers")
+**InsightLens** is a multi-source AI research assistant that converts long-form content into structured, searchable knowledge.
+
+Instead of manually reading an entire paper, watching a long video, or going through a lengthy article, users can provide the source and InsightLens:
+
+```text
+SOURCE
+  │
+  ▼
+EXTRACT CONTENT
+  │
+  ▼
+CHUNK + PROCESS
+  │
+  ▼
+GENERATE EMBEDDINGS
+  │
+  ▼
+STORE IN VECTOR DATABASE
+  │
+  ▼
+RETRIEVE RELEVANT CONTEXT
+  │
+  ▼
+LLM
+  │
+  ├──► Structured Summary
+  ├──► Key Points
+  ├──► Claims & Evidence
+  ├──► Limitations
+  └──► Grounded Q&A
