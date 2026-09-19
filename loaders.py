@@ -1,377 +1,309 @@
-"""
-loaders.py
-----------
-Source loading utilities for:
-- YouTube videos
-- PDF files
-- arXiv papers
-- Web articles
-"""
+# loaders.py
 
-import io
-import re
-from pathlib import Path
+import os
+import tempfile
 
-import requests
-from bs4 import BeautifulSoup
-from pypdf import PdfReader
+from langchain_core.documents import Document
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    WebBaseLoader,
+)
+
 from youtube_transcript_api import YouTubeTranscriptApi
 
 
-# ---------------------------------------------------------------------------
-# YouTube helpers
-# ---------------------------------------------------------------------------
+# ============================================================
+# YOUTUBE
+# ============================================================
 
-def extract_youtube_id(url: str) -> str:
+def load_youtube(url):
     """
-    Extract a YouTube video ID from common YouTube URL formats.
-    """
-
-    patterns = [
-        r"youtube\.com/watch\?v=([^&]+)",
-        r"youtu\.be/([^?&]+)",
-        r"youtube\.com/embed/([^?&]+)",
-        r"youtube\.com/shorts/([^?&]+)",
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, url)
-
-        if match:
-            return match.group(1)
-
-    raise ValueError("Could not extract YouTube video ID.")
-
-
-def _fetch_transcript_raw(video_id: str):
-    """
-    Supports different versions of youtube-transcript-api.
+    Load transcript from a YouTube video.
     """
 
-    if hasattr(YouTubeTranscriptApi, "get_transcript"):
-        return YouTubeTranscriptApi.get_transcript(video_id)
+    try:
+        # Extract video ID
+        if "youtu.be/" in url:
+            video_id = url.split("youtu.be/")[1].split("?")[0]
 
-    api = YouTubeTranscriptApi()
+        elif "watch?v=" in url:
+            video_id = url.split("watch?v=")[1].split("&")[0]
 
-    fetched = api.fetch(video_id)
+        elif "youtube.com/shorts/" in url:
+            video_id = url.split("youtube.com/shorts/")[1].split("?")[0]
 
-    return [
-        {
-            "start": snippet.start,
-            "duration": snippet.duration,
-            "text": snippet.text,
-        }
-        for snippet in fetched
-    ]
-
-
-def load_youtube(url: str) -> dict:
-    """
-    Load a YouTube transcript.
-    """
-
-    video_id = extract_youtube_id(url)
-
-    transcript = _fetch_transcript_raw(video_id)
-
-    text_parts = []
-
-    for item in transcript:
-
-        if isinstance(item, dict):
-            text = item.get("text", "")
         else:
-            text = getattr(item, "text", "")
+            raise ValueError("Invalid YouTube URL.")
 
-        if text:
-            text_parts.append(text)
+        # Get transcript
+        api = YouTubeTranscriptApi()
 
-    if not text_parts:
-        raise ValueError(
-            "No transcript text was found for this YouTube video."
+        transcript = api.fetch(video_id)
+
+        text = " ".join(
+            item.text
+            for item in transcript
         )
 
-    full_text = " ".join(text_parts)
-
-    return {
-        "source_type": "youtube",
-        "title": f"YouTube video ({video_id})",
-        "text": full_text,
-        "metadata": {
-            "video_id": video_id,
-            "url": url,
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
-# PDF helpers
-# ---------------------------------------------------------------------------
-
-def load_pdf(file) -> dict:
-    """
-    Load a PDF from:
-    - Streamlit UploadedFile
-    - file path
-    - bytes
-    """
-
-    # Streamlit UploadedFile
-    if hasattr(file, "getvalue"):
-
-        pdf_bytes = file.getvalue()
-
-        filename = getattr(
-            file,
-            "name",
-            "Uploaded PDF",
-        )
-
-        reader = PdfReader(
-            io.BytesIO(pdf_bytes)
-        )
-
-    # File path
-    elif isinstance(file, (str, Path)):
-
-        path = Path(file)
-
-        filename = path.name
-
-        reader = PdfReader(str(path))
-
-    # Raw bytes
-    elif isinstance(file, bytes):
-
-        filename = "Uploaded PDF"
-
-        reader = PdfReader(
-            io.BytesIO(file)
-        )
-
-    else:
-
-        raise TypeError(
-            "Unsupported PDF input type."
-        )
-
-    pages = []
-
-    for page_number, page in enumerate(
-        reader.pages,
-        start=1,
-    ):
-
-        text = page.extract_text() or ""
-
-        if text.strip():
-
-            pages.append(
-                f"[Page {page_number}]\n{text}"
+        if not text.strip():
+            raise ValueError(
+                "No transcript was found for this video."
             )
 
-    if not pages:
-
-        raise ValueError(
-            "No readable text was found in this PDF. "
-            "If it is a scanned/image-only PDF, OCR may be required."
-        )
-
-    full_text = "\n\n".join(pages)
-
-    return {
-        "source_type": "pdf",
-        "title": filename,
-        "text": full_text,
-        "metadata": {
-            "filename": filename,
-            "page_count": len(reader.pages),
-        },
-    }
-
-
-# ---------------------------------------------------------------------------
-# Web article helpers
-# ---------------------------------------------------------------------------
-
-def load_web_article(url: str) -> dict:
-    """
-    Load readable text from a web page.
-    """
-
-    response = requests.get(
-        url,
-        timeout=30,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "Chrome/131.0 Safari/537.36"
+        return [
+            Document(
+                page_content=text,
+                metadata={
+                    "source": url,
+                    "source_type": "youtube",
+                    "video_id": video_id,
+                },
             )
-        },
-    )
-
-    response.raise_for_status()
-
-    soup = BeautifulSoup(
-        response.text,
-        "html.parser",
-    )
-
-    for tag in soup(
-        [
-            "script",
-            "style",
-            "nav",
-            "footer",
-            "header",
-            "aside",
         ]
-    ):
-        tag.decompose()
 
-    text = soup.get_text(
-        separator="\n",
-        strip=True,
-    )
+    except Exception as e:
 
-    if not text:
-        raise ValueError(
-            "No readable text was found on this webpage."
+        raise RuntimeError(
+            f"Could not load YouTube transcript: {e}"
         )
 
-    title = (
-        soup.title.get_text(strip=True)
-        if soup.title
-        else url
-    )
 
-    return {
-        "source_type": "web",
-        "title": title,
-        "text": text,
-        "metadata": {
-            "url": url,
-        },
-    }
+# ============================================================
+# WEB ARTICLE
+# ============================================================
 
-
-# ---------------------------------------------------------------------------
-# arXiv helpers
-# ---------------------------------------------------------------------------
-
-def load_arxiv(url: str) -> dict:
+def load_web_article(url):
     """
-    Convert an arXiv abstract URL into its PDF URL
-    and process the PDF.
+    Load text from a normal web page/article.
     """
 
-    match = re.search(
-        r"arxiv\.org/(?:abs|pdf)/([^/?#]+)",
-        url,
-    )
+    try:
 
-    if not match:
-        raise ValueError(
-            "Could not determine the arXiv paper ID."
+        loader = WebBaseLoader(url)
+
+        documents = loader.load()
+
+        if not documents:
+            raise ValueError(
+                "No content could be extracted from the webpage."
+            )
+
+        for document in documents:
+
+            document.metadata["source"] = url
+            document.metadata["source_type"] = "web"
+
+        return documents
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"Could not load webpage: {e}"
         )
 
-    paper_id = match.group(1)
 
-    pdf_url = (
-        f"https://arxiv.org/pdf/{paper_id}"
-    )
+# ============================================================
+# ARXIV / RESEARCH PAPER
+# ============================================================
 
-    response = requests.get(
-        pdf_url,
-        timeout=30,
-        headers={
-            "User-Agent": "InsightExtractor/1.0"
-        },
-    )
-
-    response.raise_for_status()
-
-    result = load_pdf(
-        response.content
-    )
-
-    result["source_type"] = "pdf"
-
-    result["metadata"]["url"] = url
-    result["metadata"]["arxiv_id"] = paper_id
-
-    result["title"] = (
-        f"arXiv paper ({paper_id})"
-    )
-
-    return result
-
-
-# ---------------------------------------------------------------------------
-# Source detection
-# ---------------------------------------------------------------------------
-
-def detect_source_type(url: str) -> str:
+def load_arxiv(url):
     """
-    Detect the source type from a URL.
+    Load an arXiv research paper.
+
+    arXiv PDF URLs are handled as PDFs.
     """
 
-    url_lower = url.lower()
+    try:
 
-    if (
-        "youtube.com" in url_lower
-        or "youtu.be" in url_lower
-    ):
-        return "YouTube"
+        # arXiv pages often look like:
+        # https://arxiv.org/abs/xxxx.xxxxx
+        #
+        # Convert them to PDF URL.
 
-    if "arxiv.org" in url_lower:
-        return "arXiv"
+        if "/abs/" in url:
 
-    if url_lower.endswith(".pdf"):
-        return "PDF"
+            paper_id = url.split("/abs/")[1].split("?")[0]
 
-    return "Web article"
+            pdf_url = (
+                f"https://arxiv.org/pdf/{paper_id}.pdf"
+            )
 
+        elif "/pdf/" in url:
 
-# ---------------------------------------------------------------------------
-# Main URL loader
-# ---------------------------------------------------------------------------
+            pdf_url = url
 
-def load_source(url: str) -> dict:
-    """
-    Load a source from a URL.
-    """
+        else:
 
-    source_type = detect_source_type(url)
+            pdf_url = url
 
-    if source_type == "YouTube":
-
-        return load_youtube(url)
-
-    if source_type == "arXiv":
-
-        return load_arxiv(url)
-
-    if source_type == "PDF":
+        import requests
 
         response = requests.get(
-            url,
-            timeout=30,
-            headers={
-                "User-Agent": "InsightExtractor/1.0"
-            },
+            pdf_url,
+            timeout=30
         )
 
         response.raise_for_status()
 
-        result = load_pdf(
-            response.content
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".pdf"
+        ) as temp_file:
+
+            temp_file.write(response.content)
+
+            temp_path = temp_file.name
+
+        try:
+
+            loader = PyPDFLoader(temp_path)
+
+            documents = loader.load()
+
+            for document in documents:
+
+                document.metadata["source"] = url
+                document.metadata["source_type"] = "research_paper"
+
+            return documents
+
+        finally:
+
+            if os.path.exists(temp_path):
+
+                os.remove(temp_path)
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"Could not load research paper: {e}"
         )
 
-        result["metadata"]["url"] = url
 
-        return result
+# ============================================================
+# LOCAL PDF
+# ============================================================
 
-    return load_web_article(url)
+def load_pdf(uploaded_file):
+    """
+    Load a PDF uploaded through Streamlit.
+    """
+
+    try:
+
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".pdf"
+        ) as temp_file:
+
+            temp_file.write(
+                uploaded_file.getbuffer()
+            )
+
+            temp_path = temp_file.name
+
+        try:
+
+            loader = PyPDFLoader(temp_path)
+
+            documents = loader.load()
+
+            for document in documents:
+
+                document.metadata["source"] = (
+                    uploaded_file.name
+                )
+
+                document.metadata["source_type"] = (
+                    "local_pdf"
+                )
+
+            return documents
+
+        finally:
+
+            if os.path.exists(temp_path):
+
+                os.remove(temp_path)
+
+    except Exception as e:
+
+        raise RuntimeError(
+            f"Could not read PDF: {e}"
+        )
+
+
+# ============================================================
+# DETECT URL TYPE
+# ============================================================
+
+def detect_source_type(url):
+    """
+    Automatically determine what type of URL was provided.
+    """
+
+    url_lower = url.lower()
+
+    # YouTube
+    if (
+        "youtube.com" in url_lower
+        or "youtu.be" in url_lower
+    ):
+
+        return "youtube"
+
+    # arXiv
+    if "arxiv.org" in url_lower:
+
+        return "research_paper"
+
+    # Otherwise treat it as a web article
+    return "web"
+
+
+# ============================================================
+# MAIN LOADER
+# ============================================================
+
+def load_source(source, source_type):
+    """
+    Main entry point used by app.py / pipeline.py.
+    """
+
+    # --------------------------------------------------------
+    # LOCAL PDF
+    # --------------------------------------------------------
+
+    if source_type == "pdf":
+
+        return load_pdf(source)
+
+    # --------------------------------------------------------
+    # URL
+    # --------------------------------------------------------
+
+    if source_type == "url":
+
+        detected_type = detect_source_type(source)
+
+        if detected_type == "youtube":
+
+            return load_youtube(source)
+
+        elif detected_type == "research_paper":
+
+            return load_arxiv(source)
+
+        elif detected_type == "web":
+
+            return load_web_article(source)
+
+        else:
+
+            raise ValueError(
+                "Unsupported URL type."
+            )
+
+    raise ValueError(
+        f"Unsupported source type: {source_type}"
+    )

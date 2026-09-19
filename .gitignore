@@ -1,26 +1,25 @@
+# Environment
+.env
+.env.*
+!.env.example
+
 # Virtual environment
 venv/
 .venv/
 
-# Environment variables / secrets
-.env
-.env.*
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
+
+# Jupyter
+.ipynb_checkpoints/
 
 # Streamlit
 .streamlit/secrets.toml
 
-# Chroma / local vector database
-chroma_db/
+# Chroma
 chroma/
-*.sqlite3
-
-# IDE
-.vscode/
-.idea/
+.chroma/
 
 # OS
 .DS_Store
