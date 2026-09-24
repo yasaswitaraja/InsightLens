@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://insightlenss.streamlit.app/">
     <img src="https://img.shields.io/badge/🚀%20LIVE%20DEMO-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" />
-  </a>
+  </a> 
   <a href="https://github.com/yasaswitaraja/InsightLens">
     <img src="https://img.shields.io/badge/💻%20SOURCE%20CODE-181717?style=for-the-badge&logo=github&logoColor=white" />
   </a>
