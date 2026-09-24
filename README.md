@@ -5,7 +5,7 @@
 <p align="center">
   <strong>Transform YouTube videos, research papers, web articles, and PDFs into structured insights and grounded answers using Retrieval-Augmented Generation.</strong>
 </p>
-
+ 
 <p align="center">
   <a href="https://insightlenss.streamlit.app/">
     <img src="https://img.shields.io/badge/🚀%20LIVE%20DEMO-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white" />
