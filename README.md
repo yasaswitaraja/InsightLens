@@ -13,7 +13,7 @@
   <a href="https://github.com/yasaswitaraja/InsightLens">
     <img src="https://img.shields.io/badge/💻%20SOURCE%20CODE-181717?style=for-the-badge&logo=github&logoColor=white" />
   </a>
-</p>
+</p> 
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white" />
