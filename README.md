@@ -24,7 +24,7 @@
 
 ---
 
-## 🌐 Live Application
+##  Live Application
 
 ### 🚀 [Try InsightLens Live](https://insightlenss.streamlit.app/)
 
