@@ -1,4 +1,4 @@
-# 🔎 InsightLens — Multi-Source Insight & Q&A Generator
+#  InsightLens — Multi-Source Insight & Q&A Generator
 
 <p align="center">
   <b>Turn YouTube videos, research papers, web articles, and PDFs into structured insights and grounded answers.</b>
