@@ -1,4 +1,4 @@
-#  InsightLens
+#  InsightLens 
 
 ### Multi-Source AI Research & Q&A Assistant
 
