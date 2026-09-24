@@ -1,7 +1,7 @@
 #  InsightLens 
 
 ### Multi-Source AI Research & Q&A Assistant
-
+ 
 <p align="center">
   <strong>Transform YouTube videos, research papers, web articles, and PDFs into structured insights and grounded answers using Retrieval-Augmented Generation.</strong>
 </p>
