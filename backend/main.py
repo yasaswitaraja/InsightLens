@@ -98,8 +98,12 @@ def youtube_metadata(url: str):
 @app.post("/api/analyze/url")
 def analyze_url(url: str = Form(...)):
     session_id = uuid.uuid4().hex
+    print("[PDF DEBUG] Creating InsightEngine", flush=True)
     engine = InsightEngine()
+    print("[PDF DEBUG] InsightEngine created", flush=True)
+    print("[PDF DEBUG] Starting PDF analysis", flush=True)
     result = run_analysis(lambda: engine.analyze_url(url.strip()))
+    print("[PDF DEBUG] PDF analysis completed", flush=True)
     ENGINES[session_id] = engine
     result["session_id"] = session_id
     return result
