@@ -6,7 +6,6 @@ import re
 import unicodedata
 from urllib.parse import urlparse
 from xml.sax.saxutils import escape
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
@@ -61,10 +60,12 @@ class InsightEngine:
             max_tokens=1800,
         )
 
-        self.embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2",
-    model_kwargs={"device": "cpu"},
-    encode_kwargs={"normalize_embeddings": True},
+        self.embeddings = GoogleGenerativeAIEmbeddings(
+            model = os.getenv(
+        "GEMINI_EMBEDDING_MODEL",
+        "gemini-embedding-001",
+    ),
+    google_api_key=os.getenv("GEMINI_API_KEY"),
 )
 
         self.vector_store = None
