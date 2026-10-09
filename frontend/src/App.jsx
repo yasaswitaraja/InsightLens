@@ -17,8 +17,11 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-const API_URL = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(/\/$/, "");
-
+const API_URL = (
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:8000"
+).replace(/\/$/, "");
 const emptyResult = {
   source: null,
   sources: [],
@@ -223,7 +226,7 @@ function applyResult(data) {
     const formData = new FormData();
     formData.append("session_id", sessionId);
 
-    const response = await fetch(`http://127.0.0.1:8000/api/export/pdf`, {
+    const response = await fetch(`${API_URL}/api/export/pdf`, {
       method: "POST",
       body: formData,
     });
