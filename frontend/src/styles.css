@@ -3,8 +3,8 @@
   color: #e8e8e8;
   background: #080808;
   font-synthesis: none;
-  --orange: #B30024;
-  --orange-hover: #B30024;
+  --orange: #e5711e;
+  --orange-hover: #e5711e;
   --panel: #101010;
   --panel-2: #131313;
   --border: #272727;
@@ -80,7 +80,7 @@ a { color: inherit; }
 .video-footer strong, .video-footer span { display: block; }
 .video-footer strong { font-size: 10px; font-weight: 650; }
 .video-footer span { margin-top: 3px; color: #666; font-size: 9px; }
-.watch-link { display: inline-flex; align-items: center; gap: 6px; color: #d2431c; font-size: 10px; text-decoration: none; }
+.watch-link { display: inline-flex; align-items: center; gap: 6px; color: #d2651c; font-size: 10px; text-decoration: none; }
 .source-meta { margin-top: 12px; display: grid; grid-template-columns: 1fr 1fr; border: 1px solid #242424; border-radius: 9px; overflow: hidden; }
 .meta-item { padding: 11px 12px; }
 .meta-item + .meta-item { border-left: 1px solid #242424; }
