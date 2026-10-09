@@ -1,19 +1,54 @@
-# Python
+# Python cache files
+
+**pycache**/
+*.py[cod]
+*.pyo
+
+# Virtual environments
+
 venv/
 .venv/
-__pycache__/
-*.py[cod]
+env/
 
 # Environment variables and secrets
+
 .env
 .env.*
 !.env.example
 
-# Frontend dependencies and build files
+# Python testing and tooling
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Frontend dependencies
+
 node_modules/
+
+# Frontend build output
+
 dist/
 build/
 
-# Local databases and generated files
+# Local databases and generated vector data
+
 chroma_data/
+*.sqlite
 *.sqlite3
+*.db
+
+# Logs and temporary files
+
+*.log
+tmp/
+temp/
+
+# Editor and operating system files
+
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
