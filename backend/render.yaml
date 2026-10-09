@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: insightlens-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+      - key: GEMINI_EMBEDDING_MODEL
+        value: gemini-embedding-001
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: MAX_UPLOAD_MB
+        value: "20"
