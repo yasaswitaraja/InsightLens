@@ -107,30 +107,58 @@ def analyze_url(url: str = Form(...)):
 
 @app.post("/api/analyze/pdf")
 async def analyze_pdf(file: UploadFile = File(...)):
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload a PDF file."
+    import traceback
+
+    print("[PDF DEBUG] Request received", flush=True)
+
+    try:
+        if not file.filename or not file.filename.lower().endswith(".pdf"):
+            raise HTTPException(
+                status_code=400,
+                detail="Please upload a PDF file."
+            )
+
+        content = await file.read()
+        print(f"[PDF DEBUG] File read: {len(content)} bytes", flush=True)
+        await file.close()
+
+        if not content:
+            raise HTTPException(
+                status_code=400,
+                detail="The uploaded PDF is empty."
+                )
+
+        if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(
+                status_code=413,
+                detail=f"PDF is larger than {MAX_UPLOAD_MB} MB."
+            )
+
+        session_id = uuid.uuid4().hex
+        engine = InsightEngine()
+
+        print("[PDF DEBUG] Starting PDF analysis", flush=True)
+        result = run_analysis(
+            lambda: engine.analyze_pdf(content, file.filename)
         )
+        print("[PDF DEBUG] PDF analysis completed", flush=True)
 
-    content = await file.read()
-    await file.close()
+        ENGINES[session_id] = engine
+        result["session_id"] = session_id
 
-    if not content:
-        raise HTTPException(status_code=400, detail="The uploaded PDF is empty.")
+        print("[PDF DEBUG] Returning response", flush=True)
+        return result
 
-    if len(content) > MAX_UPLOAD_MB * 1024 * 1024:
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
         raise HTTPException(
-            status_code=413,
-            detail=f"PDF is larger than {MAX_UPLOAD_MB} MB."
+            status_code=500,
+            detail="PDF analysis failed. Check the Render logs for details."
         )
-
-    session_id = uuid.uuid4().hex
-    engine = InsightEngine()
-    result = run_analysis(lambda: engine.analyze_pdf(content, file.filename))
-    ENGINES[session_id] = engine
-    result["session_id"] = session_id
-    return result
+    finally:
+        await file.close()
 
 
 @app.post("/api/add/url")
