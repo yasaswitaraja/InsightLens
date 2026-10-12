@@ -17,11 +17,31 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-const API_URL = (
+const configuredApiUrl =
   import.meta.env.VITE_API_URL ||
   import.meta.env.VITE_API_BASE_URL ||
-  "http://localhost:8000"
+  "";
+
+const API_URL = (
+  configuredApiUrl ||
+  (import.meta.env.DEV ? "http://127.0.0.1:8000" : "")
 ).replace(/\/$/, "");
+
+async function apiFetch(path, options = {}) {
+  if (!API_URL) {
+    throw new Error(
+      "Backend URL is not configured. Set VITE_API_URL to your deployed backend URL in Vercel, then redeploy."
+    );
+  }
+
+  try {
+    return await fetch(`${API_URL}${path}`, options);
+  } catch {
+    throw new Error(
+      `Cannot reach the InsightLens backend at ${API_URL}. Check that the backend is running and that its CORS settings allow this frontend.`
+    );
+  }
+}
 const emptyResult = {
   source: null,
   sources: [],
@@ -63,7 +83,7 @@ function App() {
     return body;
   }
 
-  
+
 function applyResult(data) {
   const insights = data.insights || {};
 
@@ -115,12 +135,12 @@ function applyResult(data) {
         if (!url.trim()) throw new Error("Enter a URL first.");
         const form = new FormData();
         form.append("url", url.trim());
-        response = await fetch(`${API_URL}/api/analyze/url`, { method: "POST", body: form });
+        response = await apiFetch("/api/analyze/url", { method: "POST", body: form });
       } else {
         if (!file) throw new Error("Choose a PDF first.");
         const form = new FormData();
         form.append("file", file);
-        response = await fetch(`${API_URL}/api/analyze/pdf`, { method: "POST", body: form });
+        response = await apiFetch("/api/analyze/pdf", { method: "POST", body: form });
       }
       applyResult(await parseResponse(response));
     } catch (err) {
@@ -140,7 +160,7 @@ function applyResult(data) {
     setCompareBusy(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/add/url`, {
+      const response = await apiFetch("/api/add/url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, urls }),
@@ -165,7 +185,7 @@ function applyResult(data) {
       const form = new FormData();
       form.append("session_id", sessionId);
       form.append("file", selected);
-      const response = await fetch(`${API_URL}/api/add/pdf`, { method: "POST", body: form });
+      const response = await apiFetch("/api/add/pdf", { method: "POST", body: form });
       applyResult(await parseResponse(response));
       setComparison(null);
     } catch (err) {
@@ -180,7 +200,7 @@ function applyResult(data) {
     setCompareBusy(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/compare`, {
+      const response = await apiFetch("/api/compare", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId }),
@@ -202,7 +222,7 @@ function applyResult(data) {
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(`${API_URL}/api/ask`, {
+      const response = await apiFetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, question: trimmed }),
@@ -226,7 +246,7 @@ function applyResult(data) {
     const formData = new FormData();
     formData.append("session_id", sessionId);
 
-    const response = await fetch(`${API_URL}/api/export/pdf`, {
+    const response = await apiFetch("/api/export/pdf", {
       method: "POST",
       body: formData,
     });
@@ -367,9 +387,9 @@ function applyResult(data) {
 function YouTubePanel({ source }) {
   const videoId = source?.video_id;
 
-  const thumbnailUrl = videoId
-    ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`
-    : null;
+  const thumbnailUrl =
+    source?.thumbnail_url ||
+    (videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : null);
 
   const watchUrl =
     source?.watch_url ||
@@ -416,8 +436,12 @@ function YouTubePanel({ source }) {
 
       <div className="youtube-panel-footer">
         <div className="youtube-source-info">
-          <strong>YouTube source</strong>
-          <span>Transcript processed</span>
+          <strong>{source?.title || source?.name || "YouTube source"}</strong>
+          <span>
+            {source?.channel
+              ? `${source.channel} · Transcript processed`
+              : "Transcript processed"}
+          </span>
         </div>
 
         {watchUrl && (

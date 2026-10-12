@@ -3,7 +3,7 @@
 **pycache**/
 *.py[cod]
 *.pyo
-
+*.egg-info/
 # Virtual environments
 
 venv/
@@ -52,3 +52,8 @@ temp/
 .idea/
 .DS_Store
 Thumbs.db
+
+
+# Local backup files
+*.backup
+*.transcript-backup

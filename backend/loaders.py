@@ -49,22 +49,76 @@ def youtube_timestamp_url(video_id: str, seconds: float = 0):
 
 
 def get_youtube_metadata(video_id: str):
-    response = requests.get(
-        "https://www.youtube.com/oembed",
-        params={
-            "url": youtube_watch_url(video_id),
-            "format": "json",
-        },
-        timeout=10,
-    )
-    response.raise_for_status()
-    data = response.json()
+    """Get public YouTube metadata without making analysis depend on it.
 
-    return {
-        "title": data.get("title"),
-        "channel": data.get("author_name"),
-        "thumbnail_url": data.get("thumbnail_url"),
+    First use YouTube's oEmbed endpoint. If it is unavailable, try yt-dlp.
+    If both methods fail, return a safe fallback so transcript analysis can
+    still continue.
+    """
+    watch_url = youtube_watch_url(video_id)
+    metadata = {
+        "title": None,
+        "channel": None,
+        "thumbnail_url": None,
     }
+
+    try:
+        response = requests.get(
+            "https://www.youtube.com/oembed",
+            params={"url": watch_url, "format": "json"},
+            timeout=6,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        response.raise_for_status()
+        data = response.json()
+        metadata.update({
+            "title": data.get("title"),
+            "channel": data.get("author_name"),
+            "thumbnail_url": data.get("thumbnail_url"),
+        })
+    except (requests.RequestException, ValueError, TypeError):
+        # Metadata is helpful for the UI, but must not block transcript work.
+        pass
+
+    if not metadata["title"]:
+        try:
+            import yt_dlp
+
+            options = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "noplaylist": True,
+                "socket_timeout": 8,
+                "retries": 1,
+                "extractor_retries": 1,
+            }
+            with yt_dlp.YoutubeDL(options) as downloader:
+                info = downloader.extract_info(watch_url, download=False)
+
+            if info:
+                metadata["title"] = info.get("title")
+                metadata["channel"] = (
+                    info.get("channel")
+                    or info.get("uploader")
+                    or metadata["channel"]
+                )
+                metadata["thumbnail_url"] = (
+                    info.get("thumbnail") or metadata["thumbnail_url"]
+                )
+        except Exception:
+            # Some videos restrict metadata access; keep the app usable.
+            pass
+
+    metadata["title"] = (
+        str(metadata["title"]).strip()
+        if metadata.get("title")
+        else f"YouTube video {video_id}"
+    )
+    if metadata.get("channel"):
+        metadata["channel"] = str(metadata["channel"]).strip()
+
+    return metadata
 
 
 def get_youtube_transcript(url: str):
@@ -75,6 +129,8 @@ def get_youtube_transcript(url: str):
 
     api = YouTubeTranscriptApi()
     last_error = None
+    video_metadata = get_youtube_metadata(video_id)
+    video_title = video_metadata["title"]
 
     language_attempts = [
         ["en"],
@@ -115,9 +171,12 @@ def get_youtube_transcript(url: str):
                     Document(
                         page_content=" ".join(caption_group),
                         metadata={
-                            "source": f"YouTube video {video_id}",
+                            "source": video_title,
                             "source_type": "youtube",
                             "video_id": video_id,
+                            "title": video_title,
+                            "channel": video_metadata.get("channel"),
+                            "thumbnail_url": video_metadata.get("thumbnail_url"),
                             "segment": len(documents) + 1,
                             "start": group_start,
                             "duration": max(0.0, group_end - group_start),
@@ -264,3 +323,65 @@ def load_url_documents(url: str):
 
 def load_webpage(url: str):
     return load_url_documents(url)
+
+def load_transcript_documents(content: bytes, filename: str):
+    """Convert an uploaded TXT or SRT transcript into RAG documents."""
+    if not content:
+        raise RuntimeError("The transcript file is empty.")
+
+    try:
+        transcript_text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise RuntimeError(
+            "The transcript must be a UTF-8 encoded TXT or SRT file."
+        ) from exc
+
+    if filename.lower().endswith(".srt"):
+        transcript_text = re.sub(
+            r"^\s*\d+\s*$",
+            "",
+            transcript_text,
+            flags=re.MULTILINE,
+        )
+        transcript_text = re.sub(
+            r"\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*"
+            r"\d{2}:\d{2}:\d{2}[,.]\d{3}",
+            "",
+            transcript_text,
+        )
+
+    transcript_text = re.sub(
+        r"<[^>]+>",
+        " ",
+        transcript_text,
+    )
+    transcript_text = re.sub(
+        r"\s+",
+        " ",
+        transcript_text,
+    ).strip()
+
+    if not transcript_text:
+        raise RuntimeError(
+            "No readable transcript text was found in the file."
+        )
+
+    max_group_chars = 2500
+    documents = []
+
+    for start_index in range(0, len(transcript_text), max_group_chars):
+        segment_text = transcript_text[start_index:start_index + max_group_chars]
+
+        documents.append(
+            Document(
+                page_content=segment_text,
+                metadata={
+                    "source": filename,
+                    "source_type": "youtube_transcript_upload",
+                    "filename": filename,
+                    "segment": len(documents) + 1,
+                },
+            )
+        )
+
+    return documents

@@ -1,12 +1,12 @@
-
 import io
 import json
 import os
 import re
 import unicodedata
+import logging
 from urllib.parse import urlparse
 from xml.sax.saxutils import escape
-
+logger = logging.getLogger(__name__)
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
@@ -27,14 +27,13 @@ from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
+from loaders import extract_video_id
 from loaders import (
     extract_video_id,
-    format_timestamp,
     get_youtube_transcript,
     load_pdf_documents,
     load_url_documents,
-    youtube_timestamp_url,
+    load_transcript_documents,
     youtube_watch_url,
 )
 
@@ -57,7 +56,7 @@ class InsightEngine:
                 "openai/gpt-oss-120b",
             ),
             temperature=0,
-            max_tokens=1800,
+            max_tokens=3000,
         )
 
         self.embeddings = GoogleGenerativeAIEmbeddings(
@@ -110,7 +109,7 @@ class InsightEngine:
 
         # Normalize Unicode characters consistently.
         text = unicodedata.normalize("NFKC", text)
-        
+
 
         # Remove control characters while preserving whitespace.
         text = "".join(
@@ -305,6 +304,17 @@ class InsightEngine:
             "pdf",
         )
 
+    def analyze_transcript(self, content: bytes, filename: str):
+        documents = load_transcript_documents(content, filename)
+
+        return self._add_documents(
+            documents,
+            filename,
+            "transcript",
+        )
+
+    def add_transcript(self, content: bytes, filename: str):
+        return self.analyze_transcript(content, filename)
     def add_url(self, url: str):
         return self.analyze_url(url)
 
@@ -338,8 +348,8 @@ class InsightEngine:
 
     @staticmethod
     def _parse_json(text: str):
-        """Parse a JSON response without assuming the model is perfect."""
-        if not text or not text.strip():
+        """Parse a JSON object, including one wrapped in Markdown fences."""
+        if not isinstance(text, str) or not text.strip():
             return None
 
         cleaned = text.strip()
@@ -350,105 +360,168 @@ class InsightEngine:
             cleaned,
             flags=re.IGNORECASE,
         )
-        cleaned = re.sub(
-            r"\s*```\s*$",
-            "",
-            cleaned,
-        )
+        cleaned = re.sub(r"\s*```\s*$", "", cleaned)
 
         try:
-            return json.loads(cleaned)
+            result = json.loads(cleaned)
+            return result if isinstance(result, dict) else None
         except json.JSONDecodeError:
             pass
 
-        # Try extracting an object from surrounding text.
+        # Recover a JSON object surrounded by explanatory text.
+        decoder = json.JSONDecoder()
         start = cleaned.find("{")
 
-        if start != -1:
-            decoder = json.JSONDecoder()
-
+        while start != -1:
             try:
                 result, _ = decoder.raw_decode(cleaned[start:])
-                return result
+                if isinstance(result, dict):
+                    return result
             except json.JSONDecodeError:
                 pass
 
-        # Also support a JSON array as the complete response.
-        start = cleaned.find("[")
-
-        if start != -1:
-            decoder = json.JSONDecoder()
-
-            try:
-                result, _ = decoder.raw_decode(cleaned[start:])
-                return result
-            except json.JSONDecodeError:
-                pass
+            start = cleaned.find("{", start + 1)
 
         return None
 
+    @staticmethod
+    def _response_text(response):
+        """Extract textual content from a model response safely."""
+        content = getattr(response, "content", response)
+
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list):
+            text_parts = []
+
+            for part in content:
+                if isinstance(part, str):
+                    text_parts.append(part)
+                elif isinstance(part, dict):
+                    text_value = part.get("text")
+                    if isinstance(text_value, str):
+                        text_parts.append(text_value)
+
+            return "\n".join(text_parts)
+
+        if isinstance(content, dict):
+            return json.dumps(content, ensure_ascii=False)
+
+        return str(content) if content is not None else ""
+
     def _generate_insights(self):
-        # Limit prompt size; keep all chunks in Chroma for Q&A.
+        """Generate a structured analysis and retry once if JSON is invalid."""
         evidence_docs = self.chunks[:12]
-        evidence = self._evidence_text(evidence_docs)[:10500]
+        evidence = self._evidence_text(evidence_docs)[:8500]
+
+        if not evidence.strip():
+            raise RuntimeError(
+                "No readable evidence is available for analysis."
+            )
+
+        schema = """{
+  "summary": "Two to four concise paragraphs.",
+  "key_points": [
+    {"text": "A supported point", "evidence": ["E1"]}
+  ],
+  "findings": [
+    {
+      "text": "A supported finding",
+      "evidence": ["E1"],
+      "confidence": 0.8
+    }
+  ],
+  "concepts": [
+    {"text": "A supported concept", "evidence": ["E1"]}
+  ]
+}"""
 
         prompt = f"""
 You are the InsightLens research analysis engine.
 
 Use ONLY the supplied evidence. Never invent facts.
 
-Return one valid JSON object and nothing else.
-Do not use Markdown fences.
-Use double quotes for JSON keys and string values.
-Do not include trailing commas or unescaped line breaks inside strings.
+Return exactly one valid JSON object matching this schema:
+{schema}
 
-Required structure:
-{{
-  "summary": "Two to four concise paragraphs.",
-  "key_points": [
-    {{"text": "A supported point", "evidence": ["E1"]}}
-  ],
-  "findings": [
-    {{
-      "text": "A supported finding",
-      "evidence": ["E1"],
-      "confidence": 0.8
-    }}
-  ],
-  "concepts": [
-    {{"text": "A supported concept", "evidence": ["E1"]}}
-  ]
-}}
-
-Rules:
-- Every item must cite valid evidence IDs from the supplied evidence.
+Requirements:
+- Return JSON only. No Markdown fences or commentary.
+- Use double quotes for all keys and string values.
+- Escape special characters correctly.
+- Do not use trailing commas.
+- Each category must be an array.
+- Every evidence ID must match an ID in the supplied evidence.
 - Confidence must be a number between 0 and 1.
-- Keep each item concise.
-- Do not invent facts, statistics, trends, or conclusions.
-- If the evidence is insufficient, return an empty list for that category.
-- Do not describe a chart unless the evidence contains actual data.
+- Keep key points, findings, and concepts concise.
+- If evidence is insufficient, use an empty array.
+- Do not invent statistics, trends, or conclusions.
+- Do not describe charts unless the evidence supports them.
 
 EVIDENCE:
 {evidence}
 """
 
         response = self.llm.invoke(prompt)
-        raw = response.content
-
-        if not isinstance(raw, str):
-            raw = str(raw)
-
+        raw = self._response_text(response)
         data = self._parse_json(raw)
 
         if not isinstance(data, dict):
-            # Do not display malformed JSON as a successful summary.
-            raise RuntimeError(
-                "The AI returned invalid JSON for the research analysis. "
-                "Please retry the analysis. If this repeats, inspect the "
-                "raw model response in the backend logs."
+            logger.warning(
+                "Analysis response was not valid JSON; retrying once. "
+                "Response length=%d, finish_reason=%s",
+                len(raw),
+                getattr(response, "response_metadata", {}).get(
+                    "finish_reason", "unknown"
+                ),
             )
 
-        self.summary = str(data.get("summary", "")).strip()
+            retry_prompt = f"""
+Your previous answer was not a valid JSON object.
+
+Return ONLY one complete, valid JSON object matching this schema:
+{schema}
+
+Use only the evidence below.
+Do not include Markdown fences, commentary, or text outside the JSON.
+Use empty arrays when evidence is insufficient.
+Every evidence ID must be valid.
+Confidence must be a number between 0 and 1.
+Do not invent facts.
+
+EVIDENCE:
+{evidence[:6000]}
+"""
+
+            response = self.llm.invoke(retry_prompt)
+            raw = self._response_text(response)
+            data = self._parse_json(raw)
+
+        if not isinstance(data, dict):
+            finish_reason = getattr(
+                response, "response_metadata", {}
+            ).get("finish_reason", "unknown")
+
+            logger.error(
+                "Analysis JSON parsing failed after retry. "
+                "Response length=%d, finish_reason=%s, response_preview=%r",
+                len(raw),
+                finish_reason,
+                raw[:500],
+            )
+
+            raise RuntimeError(
+                "The AI could not return valid JSON after two attempts. "
+                "Please retry. If the issue continues, check the backend "
+                "logs and verify the configured Groq model."
+            )
+
+        # Normalize the fields so the frontend always receives
+        # predictable data types.
+        summary = data.get("summary", "")
+        self.summary = (
+            summary.strip() if isinstance(summary, str) else ""
+        )
 
         self.key_points = self._normalise_items(
             data.get("key_points")
@@ -463,15 +536,23 @@ EVIDENCE:
             data.get("concepts")
         )
 
-        for item in (
-            self.key_points
-            + self.findings
-            + self.concepts
-        ):
-            item["evidence_details"] = self._evidence_lookup(
-                item.get("evidence", [])
-            )
+        # Validate evidence IDs against the evidence supplied to the model.
+        valid_ids = {
+            f"E{index}"
+            for index in range(1, len(evidence_docs) + 1)
+        }
 
+        for item in (
+            self.key_points + self.findings + self.concepts
+        ):
+            item["evidence"] = [
+                evidence_id
+                for evidence_id in item.get("evidence", [])
+                if evidence_id in valid_ids
+            ]
+            item["evidence_details"] = self._evidence_lookup(
+                item["evidence"]
+            )
     @staticmethod
     def _normalise_items(items, include_confidence=False):
         result = []
@@ -682,6 +763,11 @@ QUESTION:
 """
 
         answer = self.llm.invoke(prompt).content.strip()
+        print("\n ---Q&A DEBUG--- \n")
+        print("Question:", cleaned_question)
+        print("Retrieved chunk IDs:", [doc.metadata.get("chunk_id") for doc in docs])
+        print("Context sent to Groq:\n", context)
+        print("\n--- END CONTEXT ---")
         evidence = []
 
         for index, doc in enumerate(docs, start=1):
