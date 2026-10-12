@@ -6,7 +6,7 @@ import requests
 from langchain_core.documents import Document
 from langchain_community.document_loaders import PyPDFLoader
 from youtube_transcript_api import YouTubeTranscriptApi
-
+from types import SimpleNamespace
 
 def extract_video_id(url: str):
     if not url:
@@ -121,115 +121,165 @@ def get_youtube_metadata(video_id: str):
     return metadata
 
 
+def get_free_api_transcript(url: str):
+    """Retrieve timestamped captions from FreeTranscriptAPI."""
+    response = requests.get(
+        "https://api.freetranscriptapi.com/v1/transcript",
+        params={"video_url": url},
+        timeout=45,
+    )
+    response.raise_for_status()
+
+    data = response.json()
+    segments = data.get("transcript")
+
+    if not isinstance(segments, list) or not segments:
+        raise RuntimeError(
+            "FreeTranscriptAPI returned no transcript segments."
+        )
+
+    transcript_items = []
+
+    for segment in segments:
+        if not isinstance(segment, dict):
+            continue
+
+        text = str(segment.get("text", "")).strip()
+        if not text:
+            continue
+
+        transcript_items.append(
+            SimpleNamespace(
+                text=text,
+                start=float(segment.get("start", 0)),
+                duration=float(segment.get("duration", 0)),
+            )
+        )
+
+    if not transcript_items:
+        raise RuntimeError("The returned transcript was empty.")
+
+    return transcript_items
+
+
+
 def get_youtube_transcript(url: str):
     video_id = extract_video_id(url)
 
     if not video_id:
         raise RuntimeError("Invalid YouTube URL.")
 
-    api = YouTubeTranscriptApi()
-    last_error = None
     video_metadata = get_youtube_metadata(video_id)
     video_title = video_metadata["title"]
+    transcript = None
+    last_error = None
 
-    language_attempts = [
-        ["en"],
-        ["en", "hi", "te"],
-        None,
-    ]
+    # First attempt: free managed transcript API.
+    try:
+        transcript = get_free_api_transcript(url)
+    except Exception as exc:
+        last_error = exc
 
-    for languages in language_attempts:
-        try:
-            if languages:
-                transcript = api.fetch(
-                    video_id,
-                    languages=languages,
-                )
-            else:
-                transcript_list = api.list(video_id)
+    # Fallback: existing YouTube transcript library.
+    if transcript is None:
+        api = YouTubeTranscriptApi()
+
+        for languages in [["en"], ["en", "hi", "te"], None]:
+            try:
+                if languages:
+                    transcript = api.fetch(
+                        video_id,
+                        languages=languages,
+                    )
+                else:
+                    transcript = None
+                    for item in api.list(video_id):
+                        transcript = item.fetch()
+                        break
+
+                    if transcript is None:
+                        raise RuntimeError(
+                            "No transcript tracks were found."
+                        )
+
+                break
+
+            except Exception as exc:
+                last_error = exc
                 transcript = None
 
-                for transcript_item in transcript_list:
-                    transcript = transcript_item.fetch()
-                    break
+    if transcript is None:
+        raise RuntimeError(
+            "YouTube transcript retrieval failed. "
+            f"Last error: {last_error}"
+        )
 
-                if transcript is None:
-                    raise RuntimeError("No transcript tracks were found.")
+    documents = []
+    caption_group = []
+    group_start = None
+    group_end = 0.0
+    group_chars = 0
+    max_group_chars = 2500
 
-            documents = []
+    def save_group():
+        if not caption_group:
+            return
+
+        documents.append(
+            Document(
+                page_content=" ".join(caption_group),
+                metadata={
+                    "source": video_title,
+                    "source_type": "youtube",
+                    "video_id": video_id,
+                    "title": video_title,
+                    "channel": video_metadata.get("channel"),
+                    "thumbnail_url": video_metadata.get("thumbnail_url"),
+                    "segment": len(documents) + 1,
+                    "start": group_start,
+                    "duration": max(0.0, group_end - group_start),
+                    "timestamp": format_timestamp(group_start),
+                    "timestamp_url": youtube_timestamp_url(
+                        video_id, group_start
+                    ),
+                },
+            )
+        )
+
+    for item in transcript:
+        caption_text = str(
+            getattr(item, "text", "")
+        ).strip()
+
+        if not caption_text:
+            continue
+
+        start = float(getattr(item, "start", 0))
+        duration = float(getattr(item, "duration", 0))
+
+        if (
+            caption_group
+            and group_chars + len(caption_text) + 1
+            > max_group_chars
+        ):
+            save_group()
             caption_group = []
             group_start = None
-            group_end = 0.0
             group_chars = 0
-            max_group_chars = 2500
 
-            def save_group():
-                if not caption_group:
-                    return
+        if group_start is None:
+            group_start = start
 
-                documents.append(
-                    Document(
-                        page_content=" ".join(caption_group),
-                        metadata={
-                            "source": video_title,
-                            "source_type": "youtube",
-                            "video_id": video_id,
-                            "title": video_title,
-                            "channel": video_metadata.get("channel"),
-                            "thumbnail_url": video_metadata.get("thumbnail_url"),
-                            "segment": len(documents) + 1,
-                            "start": group_start,
-                            "duration": max(0.0, group_end - group_start),
-                            "timestamp": format_timestamp(group_start),
-                            "timestamp_url": youtube_timestamp_url(
-                                video_id, group_start
-                            ),
-                        },
-                    )
-                )
+        caption_group.append(caption_text)
+        group_chars += len(caption_text) + 1
+        group_end = start + duration
 
-            for item in transcript:
-                caption_text = str(
-                    getattr(item, "text", "")
-                ).strip()
+    save_group()
 
-                if not caption_text:
-                    continue
+    if documents:
+        return documents, "available"
 
-                start = float(getattr(item, "start", 0))
-                duration = float(getattr(item, "duration", 0))
-
-                if (
-                    caption_group
-                    and group_chars + len(caption_text) + 1
-                    > max_group_chars
-                ):
-                    save_group()
-                    caption_group = []
-                    group_start = None
-                    group_chars = 0
-
-                if group_start is None:
-                    group_start = start
-
-                caption_group.append(caption_text)
-                group_chars += len(caption_text) + 1
-                group_end = start + duration
-
-            save_group()
-
-            if documents:
-                return documents, "available"
-
-            last_error = RuntimeError("The transcript was empty.")
-
-        except Exception as exc:
-            last_error = exc
-
-    raise RuntimeError(
-        "YouTube transcript could not be retrieved. "
-        f"Reason: {last_error}"
-    )
+    raise RuntimeError("The transcript was empty.")
 
 
 def load_pdf_documents(content: bytes, filename: str):
